@@ -19,6 +19,7 @@ if "%1" equ "x64" (
 ) else if "%PROCESSOR_ARCHITECTURE%" equ "ARM64" (
   set ARCH=arm64
 )
+echo Targetting architecture "%ARCH%"
 
 rem
 rem dependencies
@@ -35,20 +36,6 @@ where /q cmake.exe || (
 )
 
 rem
-rem 7-Zip
-rem
-
-if exist "%ProgramFiles%\7-Zip\7z.exe" (
-  set SZIP="%ProgramFiles%\7-Zip\7z.exe"
-) else (
-  where /q 7za.exe || (
-    echo ERROR: 7-Zip installation or "7za.exe" not found
-    exit /b 1
-  )
-  set SZIP=7za.exe
-)
-
-rem
 rem clone dawn
 rem
 
@@ -57,6 +44,7 @@ if "%DAWN_COMMIT%" equ "" (
 )
 
 if not exist dawn (
+  echo Initialising local dawn repository...
   mkdir dawn
   pushd dawn
   call git init .                                               || exit /b 1
@@ -66,7 +54,9 @@ if not exist dawn (
 
 pushd dawn
 
+echo Fetching dawn from origin "%DAWN_COMMIT%"...
 call git fetch --no-recurse-submodules origin %DAWN_COMMIT%       || exit /b 1
+echo Checking out...
 call git -c advice.detachedHead=false checkout --force FETCH_HEAD || exit /b 1
 
 popd
@@ -75,12 +65,14 @@ rem
 rem patch
 rem
 
+echo Patching...
 call git apply -p1 --directory=dawn dawn.patch || exit /b 1
 
 rem
 rem fetch dependencies
 rem
 
+echo Fetching dependencies...
 call python "dawn/tools/fetch_dawn_dependencies.py" --directory dawn
 
 rem
@@ -89,10 +81,11 @@ rem
 
 rem required Windows SDK version is in dawn\build\vs_toolchain.py file
 
+echo Executing cmake...
 cmake.exe                                     ^
   -S dawn                                     ^
   -B dawn.build-%ARCH%                        ^
-  -A %ARCH%,version=10.0.26100.0              ^
+  -A %ARCH%                                   ^
   -D CMAKE_BUILD_TYPE=Release                 ^
   -D CMAKE_POLICY_DEFAULT_CMP0091=NEW         ^
   -D CMAKE_POLICY_DEFAULT_CMP0092=NEW         ^
@@ -117,6 +110,7 @@ cmake.exe                                     ^
   -D TINT_BUILD_CMD_TOOLS=ON                  ^
   || exit /b 1
 
+echo Building...
 set CL=/Wv:18
 cmake.exe --build dawn.build-%ARCH% --config Release --target webgpu_dawn tint_cmd_tint_cmd --parallel || exit /b 1
 
@@ -124,6 +118,7 @@ rem
 rem prepare output folder
 rem
 
+echo Copying build artefacts to "dawn-%ARCH%"...
 mkdir dawn-%ARCH%
 
 echo %DAWN_COMMIT% > dawn-%ARCH%\commit.txt
@@ -143,5 +138,9 @@ if "%GITHUB_WORKFLOW%" neq "" (
   rem GitHub actions stuff
   rem
 
-  %SZIP% a -y -mx=9 dawn-%ARCH%-%BUILD_DATE%.zip dawn-%ARCH% || exit /b 1
+  where /q tar.exe (
+    pushd dawn-%ARCH%
+    tar -cz -f dawn-%ARCH%-%BUILD_DATE%.zip webgpu.h webgpu_dawn.dll webgpu_dawn.lib
+    popd
+  )
 )
